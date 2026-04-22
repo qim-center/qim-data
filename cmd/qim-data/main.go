@@ -47,7 +47,7 @@ func run(args []string) error {
 }
 
 func printUsage() {
-	fmt.Print(`qim-data - DTU/MAX IV transfer wrapper for croc
+	fmt.Print(`qim-data - transfer wrapper for croc
 
 Usage:
   qim-data setup [flags]
@@ -428,8 +428,7 @@ func crocEnvFromConfig(cfg config.Config) (map[string]string, error) {
 		return env, nil
 	}
 
-	// Explicitly unset CROC_PASS to prevent shell-env interference
-	// when running in open relay mode.
-	env["CROC_PASS"] = ""
+	// In open relay mode, do not set CROC_PASS at all.
+	// This prevents interference with the relay's open mode.
 	return env, nil
 }

@@ -42,6 +42,8 @@ qim-data setup
 
 # optional advanced usage
 qim-data setup --relay data-relay.qim.dk:9009 --pass-file ~/.config/qim-data/relay.pass
+
+# setup automatically runs validation checks when complete
 ```
 
 ## `qim-data send`
@@ -86,7 +88,7 @@ qim-data receive 1234-code-words
 qim-data receive --out /data/incoming
 ```
 
-## `qim-data doctor`
+## `qim-data check`
 
 Checks:
 
@@ -100,7 +102,7 @@ Checks:
 Example:
 
 ```bash
-qim-data doctor
+qim-data check
 ```
 
 ## Current limitations (intentional for MVP)
@@ -111,5 +113,5 @@ qim-data doctor
 ## Next planned improvements
 
 1. OS-native secure storage for relay secret.
-2. Additional diagnostics (`qim-data doctor --verbose`).
+2. Additional diagnostics (`qim-data check --verbose`).
 3. Packaging/release pipeline for Linux/macOS/Windows.

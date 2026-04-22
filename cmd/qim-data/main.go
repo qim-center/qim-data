@@ -35,8 +35,8 @@ func run(args []string) error {
 		return runSend(args[1:])
 	case "receive":
 		return runReceive(args[1:])
-	case "doctor":
-		return runDoctor(args[1:])
+	case "check":
+		return runCheck(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -53,13 +53,13 @@ Usage:
   qim-data setup [flags]
   qim-data send [flags] <file-or-folder> [more files...]
   qim-data receive [flags] [code]
-  qim-data doctor [flags]
+  qim-data check [flags]
 
 Commands:
   setup    Configure relay and croc path (password optional).
   send     Send files/folders using default Qim relay settings.
   receive  Receive transfers; optionally provide the code.
-  doctor   Validate local setup and relay reachability.
+  check    Validate local setup and relay reachability.
 
 Examples:
   qim-data setup
@@ -67,7 +67,7 @@ Examples:
   qim-data send ./dataset.zarr
   qim-data receive
   qim-data receive 1234-word-code
-  qim-data doctor
+  qim-data check
 `)
 }
 
@@ -151,8 +151,9 @@ func runSetup(args []string) error {
 	} else {
 		fmt.Println("Relay password: not configured (open relay mode)")
 	}
-	fmt.Println("Next: run `qim-data doctor`")
-	return nil
+	fmt.Println()
+	fmt.Println("Running validation checks...")
+	return runCheck(nil)
 }
 
 func runSend(args []string) error {
@@ -249,8 +250,8 @@ func runReceive(args []string) error {
 	return croc.Run(crocPath, crocArgs, extraEnv)
 }
 
-func runDoctor(args []string) error {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+func runCheck(args []string) error {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	relayOverride := fs.String("relay", "", "Relay endpoint host:port")
 	crocPathOverride := fs.String("croc-path", "", "Path to croc binary")
 	timeout := fs.Duration("timeout", 3*time.Second, "Relay dial timeout")
@@ -258,7 +259,7 @@ func runDoctor(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("doctor does not accept positional args")
+		return errors.New("check does not accept positional args")
 	}
 
 	cfg, cfgErr := config.Load()
@@ -331,7 +332,7 @@ func runDoctor(args []string) error {
 	}
 
 	if failed {
-		return errors.New("doctor checks failed")
+		return errors.New("check failed")
 	}
 
 	fmt.Println("All checks passed.")
@@ -424,7 +425,11 @@ func crocEnvFromConfig(cfg config.Config) (map[string]string, error) {
 	if legacy != "" {
 		// Legacy compatibility only; setup migrates this away.
 		env["CROC_PASS"] = legacy
+		return env, nil
 	}
 
+	// Explicitly unset CROC_PASS to prevent shell-env interference
+	// when running in open relay mode.
+	env["CROC_PASS"] = ""
 	return env, nil
 }

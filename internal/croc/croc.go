@@ -89,7 +89,20 @@ func Run(path string, args []string, extraEnv map[string]string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	// Build env, filtering out any keys that extraEnv explicitly sets.
 	env := os.Environ()
+	extraKeys := make(map[string]bool)
+	for k := range extraEnv {
+		extraKeys[k] = true
+	}
+	filtered := make([]string, 0, len(env))
+	for _, v := range env {
+		key := strings.SplitN(v, "=", 2)[0]
+		if !extraKeys[key] {
+			filtered = append(filtered, v)
+		}
+	}
+	env = filtered
 	for k, v := range extraEnv {
 		env = append(env, k+"="+v)
 	}

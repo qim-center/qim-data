@@ -211,6 +211,15 @@ func runReceive(args []string) error {
 	}
 	if fs.NArg() == 1 {
 		code = strings.TrimSpace(fs.Arg(0))
+	} else {
+		entered, err := prompt("Enter receive code: ")
+		if err != nil {
+			return err
+		}
+		code = strings.TrimSpace(entered)
+		if code == "" {
+			return errors.New("receive code cannot be empty")
+		}
 	}
 
 	cfg, err := requireConfig()
@@ -234,10 +243,8 @@ func runReceive(args []string) error {
 
 	extraEnv := map[string]string{}
 	extraEnv["CROC_PASS"] = cfg.RelayPass
-	if code != "" {
-		// Using CROC_SECRET avoids classic-mode issues on Linux/macOS.
-		extraEnv["CROC_SECRET"] = code
-	}
+	// Using CROC_SECRET avoids classic-mode issues on Linux/macOS.
+	extraEnv["CROC_SECRET"] = code
 
 	return croc.Run(crocPath, crocArgs, extraEnv, []string{cfg.RelayPass})
 }

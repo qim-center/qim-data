@@ -74,6 +74,7 @@ croc --relay <relay>
 ```
 
 If a code is provided, `qim-data` sets `CROC_SECRET=<code>` so Linux/macOS users avoid classic-mode friction.
+If no code is provided, `qim-data` prompts for it and still passes it as `CROC_SECRET`.
 
 Examples:
 

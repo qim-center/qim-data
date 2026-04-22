@@ -51,8 +51,14 @@ done
 echo ""
 echo "Generating checksums..."
 cd "${BUILD_DIR}"
-shasum -a 256 qim-data_* > SHA256SUMS
-cat SHA256SUMS
+if command -v sha256sum &> /dev/null; then
+  sha256sum qim-data_* > SHA256SUMS
+elif command -v shasum &> /dev/null; then
+  shasum -a 256 qim-data_* > SHA256SUMS
+else
+  echo "Warning: neither sha256sum nor shasum found, skipping checksum generation"
+fi
+[ -f SHA256SUMS ] && cat SHA256SUMS
 cd ..
 
 echo ""

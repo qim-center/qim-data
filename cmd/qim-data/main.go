@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -57,12 +56,13 @@ Usage:
   qim-data doctor [flags]
 
 Commands:
-  setup    Configure relay, relay secret, and croc path.
+  setup    Configure relay and croc path (password optional).
   send     Send files/folders using default Qim relay settings.
   receive  Receive transfers; optionally provide the code.
   doctor   Validate local setup and relay reachability.
 
 Examples:
+  qim-data setup
   qim-data setup --pass-file ~/.config/qim-data/relay.pass
   qim-data send ./dataset.zarr
   qim-data receive
@@ -74,10 +74,9 @@ Examples:
 func runSetup(args []string) error {
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	relay := fs.String("relay", config.DefaultRelay, "Relay endpoint host:port")
-	pass := fs.String("pass", "", "Relay password (prefer --pass-file)")
-	passFile := fs.String("pass-file", "", "Path to file containing relay password")
+	pass := fs.String("pass", "", "Relay password (optional; prefer --pass-file)")
+	passFile := fs.String("pass-file", "", "Path to file containing relay password (optional)")
 	crocPath := fs.String("croc-path", "", "Path to croc binary (optional override)")
-	nonInteractive := fs.Bool("non-interactive", false, "Fail instead of prompting when password is missing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -99,22 +98,17 @@ func runSetup(args []string) error {
 		}
 		relayPass = strings.TrimSpace(string(b))
 	}
-	if relayPass == "" && !*nonInteractive {
-		entered, err := prompt("Relay password (input visible): ")
+	if relayPass != "" {
+		secretPath, err := config.WriteSecret(relayPass)
 		if err != nil {
 			return err
 		}
-		relayPass = strings.TrimSpace(entered)
+		cfg.RelayPassFile = secretPath
+		cfg.RelayPass = ""
+	} else {
+		cfg.RelayPassFile = ""
+		cfg.RelayPass = ""
 	}
-	if relayPass == "" {
-		return errors.New("relay password is empty; provide --pass, --pass-file, or interactive input")
-	}
-	secretPath, err := config.WriteSecret(relayPass)
-	if err != nil {
-		return err
-	}
-	cfg.RelayPassFile = secretPath
-	cfg.RelayPass = ""
 
 	if *crocPath != "" {
 		resolved, err := croc.ResolveBinary(cfg, strings.TrimSpace(*crocPath))
@@ -152,7 +146,11 @@ func runSetup(args []string) error {
 	if cfg.CrocPath != "" {
 		fmt.Printf("Croc binary: %s\n", cfg.CrocPath)
 	}
-	fmt.Printf("Relay secret file: %s\n", cfg.RelayPassFile)
+	if cfg.RelayPassFile != "" {
+		fmt.Printf("Relay secret file: %s\n", cfg.RelayPassFile)
+	} else {
+		fmt.Println("Relay password: not configured (open relay mode)")
+	}
 	fmt.Println("Next: run `qim-data doctor`")
 	return nil
 }
@@ -194,8 +192,9 @@ func runSend(args []string) error {
 	crocArgs = append(crocArgs, passthrough...)
 	crocArgs = append(crocArgs, paths...)
 
-	extraEnv := map[string]string{
-		"CROC_PASS": cfg.RelayPassFile,
+	extraEnv, err := crocEnvFromConfig(cfg)
+	if err != nil {
+		return err
 	}
 	return croc.Run(crocPath, crocArgs, extraEnv)
 }
@@ -238,8 +237,9 @@ func runReceive(args []string) error {
 	}
 	crocArgs = append(crocArgs, passthrough...)
 
-	extraEnv := map[string]string{
-		"CROC_PASS": cfg.RelayPassFile,
+	extraEnv, err := crocEnvFromConfig(cfg)
+	if err != nil {
+		return err
 	}
 	if code != "" {
 		// Using CROC_SECRET avoids classic-mode issues on Linux/macOS.
@@ -288,9 +288,11 @@ func runDoctor(args []string) error {
 		printCheck(true, "relay", relay)
 	}
 
-	passFile, perr := ensureRelayPassFile(cfg, false)
-	if perr != nil {
-		printCheck(false, "relay password", perr.Error())
+	passFile := strings.TrimSpace(cfg.RelayPassFile)
+	if passFile == "" {
+		printCheck(true, "relay password", "not configured (open relay mode)")
+	} else if _, err := os.Stat(passFile); err != nil {
+		printCheck(false, "relay password", fmt.Sprintf("configured file missing: %s", passFile))
 		failed = true
 	} else {
 		printCheck(true, "relay password", "configured via "+passFile)
@@ -344,44 +346,23 @@ func requireConfig() (config.Config, error) {
 		}
 		return cfg, err
 	}
-	passFile, err := ensureRelayPassFile(cfg, true)
-	if err != nil {
-		return cfg, err
+	if strings.TrimSpace(cfg.RelayPassFile) == "" && strings.TrimSpace(cfg.RelayPass) != "" {
+		// Migrate legacy inline secret into local secret file.
+		secretPath, err := config.WriteSecret(strings.TrimSpace(cfg.RelayPass))
+		if err != nil {
+			return cfg, err
+		}
+		cfg.RelayPassFile = secretPath
+		cfg.RelayPass = ""
+		if err := config.Save(cfg); err != nil {
+			return cfg, err
+		}
 	}
-	cfg.RelayPassFile = passFile
+
 	if cfg.Relay == "" {
 		cfg.Relay = config.DefaultRelay
 	}
 	return cfg, nil
-}
-
-func ensureRelayPassFile(cfg config.Config, allowMigrate bool) (string, error) {
-	passFile := strings.TrimSpace(cfg.RelayPassFile)
-	if passFile != "" {
-		if _, err := os.Stat(passFile); err != nil {
-			return "", fmt.Errorf("relay secret file not readable at %s (run `qim-data setup`)", passFile)
-		}
-		return passFile, nil
-	}
-
-	legacy := strings.TrimSpace(cfg.RelayPass)
-	if legacy == "" {
-		return "", errors.New("relay password not configured (run `qim-data setup`)")
-	}
-	if !allowMigrate {
-		return "", errors.New("legacy relay password found; run `qim-data setup` to migrate")
-	}
-
-	secretPath, err := config.WriteSecret(legacy)
-	if err != nil {
-		return "", err
-	}
-	cfg.RelayPassFile = secretPath
-	cfg.RelayPass = ""
-	if err := config.Save(cfg); err != nil {
-		return "", err
-	}
-	return secretPath, nil
 }
 
 func chooseRelay(configRelay, override string) string {
@@ -427,12 +408,23 @@ func printCheck(ok bool, check, detail string) {
 	fmt.Printf("[%s] %-18s %s\n", state, check, detail)
 }
 
-func prompt(message string) (string, error) {
-	fmt.Print(message)
-	reader := bufio.NewReader(os.Stdin)
-	text, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
+func crocEnvFromConfig(cfg config.Config) (map[string]string, error) {
+	env := map[string]string{}
+
+	passFile := strings.TrimSpace(cfg.RelayPassFile)
+	if passFile != "" {
+		if _, err := os.Stat(passFile); err != nil {
+			return nil, fmt.Errorf("relay secret file not readable at %s (run `qim-data setup`)", passFile)
+		}
+		env["CROC_PASS"] = passFile
+		return env, nil
 	}
-	return strings.TrimSpace(text), nil
+
+	legacy := strings.TrimSpace(cfg.RelayPass)
+	if legacy != "" {
+		// Legacy compatibility only; setup migrates this away.
+		env["CROC_PASS"] = legacy
+	}
+
+	return env, nil
 }

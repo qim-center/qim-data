@@ -83,7 +83,8 @@ Run a dedicated `croc relay` service on `qimserver` with systemd:
 
 - DNS: `data-relay.qim.dk` -> `qimserver`.
 - Open TCP ports `9009-9013` (or a custom contiguous set if needed).
-- Use a strong relay password stored in a root-readable secret file (not CLI plain text).
+- Initial phase: run relay in open mode (no relay password) for simplest onboarding.
+- Later phase: enable relay password if misuse is observed.
 - Restrict network exposure with firewall allowlists and/or VPN where possible.
 - Monitor via systemd logs + basic host/network monitoring.
 
@@ -91,11 +92,10 @@ Suggested service pattern:
 
 - Service base path: `/srv/qim-data`
 - Binary path: `/srv/qim-data/bin/croc`
-- Secret file: `/etc/qim-data/relay.pass` (`chmod 600`, root-owned)
 - Service command:
 
 ```bash
-/srv/qim-data/bin/croc --pass /etc/qim-data/relay.pass relay \
+/srv/qim-data/bin/croc relay \
   --host 0.0.0.0 \
   --ports 9009,9010,9011,9012,9013
 ```
@@ -115,7 +115,8 @@ Wrapper defaults:
 
 - Always use `--relay data-relay.qim.dk:9009`.
 - Do not require users to type relay passwords.
-- `qim-data` injects relay credentials internally (from managed local config/secure storage).
+- In initial phase, no relay password is required.
+- If password mode is enabled later, `qim-data` injects credentials internally (from managed local config/secure storage).
 - Keep upstream `croc` behavior for transfer semantics, resume, prompts, etc.
 
 Initial implementation mode:
@@ -126,20 +127,20 @@ Initial implementation mode:
 
 ### 5.3 Authentication UX (Final Direction)
 
-Goal: easy for users, controlled for operations.
+Goal: easy for users now, controlled operations later.
 
 - Users run `qim-data send ...` / `qim-data receive ...` with no manual relay secret handling.
-- `qim-data` stores relay credentials once during onboarding (`qim-data setup`).
-- Credentials are reused silently by the wrapper when invoking `croc`.
+- Initial phase: no credentials are needed.
+- Hardening phase: `qim-data` stores relay credentials once during onboarding (`qim-data setup`), then reuses silently.
 
 Operational note:
 
-- True "no relay password at all" is only acceptable if network access is tightly restricted (VPN/IP allowlist/private routing), otherwise relay abuse risk is high.
+- Open relay mode is a deliberate simplification tradeoff for MVP and should be monitored closely.
 
 ## 6. Security and Compliance Baseline
 
-- Do not use `croc` default relay password (`pass123`) in production.
-- Rotate relay password on a schedule and after staff changes/incidents.
+- If password mode is enabled, do not use `croc` default password (`pass123`) in production.
+- If password mode is enabled, rotate relay password on a schedule and after staff changes/incidents.
 - Prefer network-level controls (VPN, IP allowlist to DTU/MAX IV ranges).
 - Keep relay host hardened and patched (AlmaLinux + security updates).
 - Keep `croc` version pinned and reviewed; update intentionally after compatibility checks.
@@ -169,7 +170,7 @@ Exit criteria:
 - Build Go wrapper with `send` and `receive`.
 - Enforce relay defaults.
 - Add `qim-data doctor` for environment checks (`croc` present, relay reachable, config valid).
-- Add `qim-data setup` to store relay credential once, so users do not export `CROC_PASS`.
+- Add `qim-data setup` for one-command onboarding and optional credential configuration for hardening mode.
 
 Exit criteria:
 
@@ -189,7 +190,7 @@ Exit criteria:
 ### Phase 4: Hardening and Operations
 
 - Add structured logging conventions and runbook.
-- Add password rotation procedure.
+- Add password rotation procedure for optional hardening mode.
 - Add reliability tests with large synthetic data.
 
 Exit criteria:
@@ -201,8 +202,8 @@ Exit criteria:
 - Single relay SPOF.
   Mitigation: backups/snapshots, rebuild runbook, optional secondary relay in next iteration.
 
-- Shared relay secret leakage.
-  Mitigation: rotate secret, distribute securely, enforce network restrictions, consider identity-aware access in future.
+- Open relay abuse risk.
+  Mitigation: monitor logs/network metrics, then enable password mode quickly if misuse appears.
 
 - Upstream incompatibility drift.
   Mitigation: pin tested `croc` version(s), add compatibility CI for wrapper against target versions.
@@ -215,7 +216,7 @@ Exit criteria:
 After approval of this strategy, implementation starts with:
 
 1. `qimserver` systemd + firewall setup instructions (operator runbook) under `/srv/qim-data`.
-2. Go CLI skeleton (`qim-data send`, `qim-data receive`, `qim-data doctor`, `qim-data setup`) with relay defaults and hidden credential handling.
+2. Go CLI skeleton (`qim-data send`, `qim-data receive`, `qim-data doctor`, `qim-data setup`) with relay defaults and optional credential handling.
 3. End-to-end integration test between two hosts using `data-relay.qim.dk`.
 
 ## 11. Progress Notes

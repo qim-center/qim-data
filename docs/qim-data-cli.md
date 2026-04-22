@@ -4,7 +4,7 @@ This document describes the first wrapper implementation around `croc`.
 
 ## Why this exists
 
-`croc` is the transfer engine. `qim-data` provides stable defaults so users do not need to remember relay host, relay password flags, or version requirements.
+`croc` is the transfer engine. `qim-data` provides stable defaults so users do not need to remember relay host or version requirements.
 
 In Python/Bash terms:
 
@@ -24,7 +24,7 @@ Stores local config in the user config directory:
 Config fields:
 
 - `relay` (default: `data-relay.qim.dk:9009`)
-- `relay_pass_file` (path to local relay secret file)
+- `relay_pass_file` (optional path to local relay secret file)
 - `croc_path` (optional fixed binary path)
 
 Behavior:
@@ -32,7 +32,8 @@ Behavior:
 - If no valid `croc` v10+ is found, setup auto-downloads pinned `croc` (`v10.4.2`) for the current OS/arch.
 - Downloaded binary is stored in a managed user path and written to config as `croc_path`.
   - Linux example path: `~/.cache/qim-data/bin/croc`
-- Relay secret is stored in a local secret file (Linux example: `~/.config/qim-data/relay.pass`).
+- If `--pass` or `--pass-file` is provided, relay secret is stored in a local secret file (Linux example: `~/.config/qim-data/relay.pass`).
+- If no password is provided, setup configures open relay mode.
 
 Example:
 
@@ -51,7 +52,7 @@ Wraps:
 croc --relay <relay> send ...
 ```
 
-`qim-data` injects relay credentials through environment variables using `CROC_PASS=<path-to-secret-file>`.
+If `relay_pass_file` is configured, `qim-data` injects relay credentials using `CROC_PASS=<path-to-secret-file>`.
 
 Example:
 
@@ -91,7 +92,7 @@ Checks:
 
 - config presence
 - relay configured
-- relay password configured
+- relay password status (configured or open relay mode)
 - croc binary discovery
 - croc version (requires major `v10+`)
 - relay TCP reachability
@@ -104,8 +105,8 @@ qim-data doctor
 
 ## Current limitations (intentional for MVP)
 
-- Relay password is stored in local config as plain text for now.
-- No enterprise auth layer yet; relay security is currently password + network controls.
+- No enterprise auth layer yet.
+- In open relay mode (default in this phase), relay abuse protection relies on monitoring and network controls.
 
 ## Next planned improvements
 

@@ -8,6 +8,7 @@ Data transfer tooling from the Qim Center.
 - Initial Go wrapper CLI scaffold (`qim-data`) is implemented.
 - `qim-data setup` now auto-installs pinned `croc` binaries when needed.
 - Target onboarding flow: `qim-data setup` once, then `qim-data send` / `qim-data receive`.
+- Current phase default: open relay mode (no password required).
 
 See:
 

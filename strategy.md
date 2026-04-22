@@ -227,3 +227,4 @@ After approval of this strategy, implementation starts with:
 - Firewall and DNS were validated for external TCP access on `9009-9013`.
 - Real transfer test succeeded (`2.8 GB` scale, approx `120 MB/s`) using `data-relay.qim.dk`.
 - Wrapper implementation started in this repo (`qim-data` Go CLI scaffold + docs).
+- `qim-data setup` implementation now auto-installs pinned `croc` builds for major user platforms.

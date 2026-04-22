@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	"qim-data/internal/config"
 	"qim-data/internal/croc"
+	"qim-data/internal/installer"
 )
 
 func main() {
@@ -74,7 +76,7 @@ func runSetup(args []string) error {
 	relay := fs.String("relay", config.DefaultRelay, "Relay endpoint host:port")
 	pass := fs.String("pass", "", "Relay password (prefer --pass-file)")
 	passFile := fs.String("pass-file", "", "Path to file containing relay password")
-	crocPath := fs.String("croc-path", "", "Path to croc binary (optional)")
+	crocPath := fs.String("croc-path", "", "Path to croc binary (optional override)")
 	nonInteractive := fs.Bool("non-interactive", false, "Fail instead of prompting when password is missing")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -110,11 +112,26 @@ func runSetup(args []string) error {
 	cfg.RelayPass = relayPass
 
 	if *crocPath != "" {
-		cfg.CrocPath = strings.TrimSpace(*crocPath)
-	} else {
-		if p, err := croc.ResolveBinary(cfg, ""); err == nil {
-			cfg.CrocPath = p
+		resolved, err := croc.ResolveBinary(cfg, strings.TrimSpace(*crocPath))
+		if err != nil {
+			return err
 		}
+		version, err := croc.Version(resolved)
+		if err != nil {
+			return err
+		}
+		major, ok := croc.ParseMajor(version)
+		if !ok || major < 10 {
+			return fmt.Errorf("croc path %s is not v10+ (%s)", resolved, version)
+		}
+		cfg.CrocPath = resolved
+	} else {
+		fmt.Printf("Ensuring croc %s for %s/%s...\n", installer.PinnedCrocVersion, runtime.GOOS, runtime.GOARCH)
+		p, err := installer.EnsureCroc(cfg.CrocPath)
+		if err != nil {
+			return fmt.Errorf("ensure croc: %w", err)
+		}
+		cfg.CrocPath = p
 	}
 
 	if err := config.Save(cfg); err != nil {
@@ -163,7 +180,6 @@ func runSend(args []string) error {
 
 	crocArgs := []string{
 		"--relay", relay,
-		"--pass", cfg.RelayPass,
 		"send",
 	}
 	if trimmed := strings.TrimSpace(*code); trimmed != "" {
@@ -172,7 +188,10 @@ func runSend(args []string) error {
 	crocArgs = append(crocArgs, passthrough...)
 	crocArgs = append(crocArgs, paths...)
 
-	return croc.Run(crocPath, crocArgs, nil)
+	extraEnv := map[string]string{
+		"CROC_PASS": cfg.RelayPass,
+	}
+	return croc.Run(crocPath, crocArgs, extraEnv, []string{cfg.RelayPass})
 }
 
 func runReceive(args []string) error {
@@ -207,7 +226,6 @@ func runReceive(args []string) error {
 
 	crocArgs := []string{
 		"--relay", relay,
-		"--pass", cfg.RelayPass,
 	}
 	if out := strings.TrimSpace(*outDir); out != "" {
 		crocArgs = append(crocArgs, "--out", out)
@@ -215,12 +233,13 @@ func runReceive(args []string) error {
 	crocArgs = append(crocArgs, passthrough...)
 
 	extraEnv := map[string]string{}
+	extraEnv["CROC_PASS"] = cfg.RelayPass
 	if code != "" {
 		// Using CROC_SECRET avoids classic-mode issues on Linux/macOS.
 		extraEnv["CROC_SECRET"] = code
 	}
 
-	return croc.Run(crocPath, crocArgs, extraEnv)
+	return croc.Run(crocPath, crocArgs, extraEnv, []string{cfg.RelayPass})
 }
 
 func runDoctor(args []string) error {

@@ -24,7 +24,7 @@ Stores local config in the user config directory:
 Config fields:
 
 - `relay` (default: `data-relay.qim.dk:9009`)
-- `relay_pass` (relay secret)
+- `relay_pass_file` (path to local relay secret file)
 - `croc_path` (optional fixed binary path)
 
 Behavior:
@@ -32,6 +32,7 @@ Behavior:
 - If no valid `croc` v10+ is found, setup auto-downloads pinned `croc` (`v10.4.2`) for the current OS/arch.
 - Downloaded binary is stored in a managed user path and written to config as `croc_path`.
   - Linux example path: `~/.cache/qim-data/bin/croc`
+- Relay secret is stored in a local secret file (Linux example: `~/.config/qim-data/relay.pass`).
 
 Example:
 
@@ -50,7 +51,7 @@ Wraps:
 croc --relay <relay> send ...
 ```
 
-`qim-data` injects relay credentials through environment variables, and redacts the configured relay secret from command output.
+`qim-data` injects relay credentials through environment variables using `CROC_PASS=<path-to-secret-file>`.
 
 Example:
 
@@ -74,7 +75,7 @@ croc --relay <relay>
 ```
 
 If a code is provided, `qim-data` sets `CROC_SECRET=<code>` so Linux/macOS users avoid classic-mode friction.
-If no code is provided, `qim-data` prompts for it and still passes it as `CROC_SECRET`.
+If no code is provided, `croc` handles interactive code entry and transfer prompts.
 
 Examples:
 

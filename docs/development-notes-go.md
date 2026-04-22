@@ -28,14 +28,14 @@ Python equivalent pattern:
 
 ```python
 cfg = load_config()
-env = {**os.environ, "CROC_PASS": cfg.relay_pass}
+env = {**os.environ, "CROC_PASS": cfg.relay_pass_file}
 cmd = ["croc", "--relay", cfg.relay, "send", path]
 subprocess.run(cmd, check=True, env=env)
 ```
 
 ## Security note for current MVP
 
-Right now `relay_pass` is stored in plain text in local config (permissions are restricted).
+Right now relay secret is stored in a local file (`relay_pass_file` in config points to it), with restrictive permissions.
 
 Future improvement:
 
@@ -63,3 +63,8 @@ go run ./cmd/qim-data doctor
 ## Common debugging pattern
 
 If wrapper command fails, run the equivalent `croc` command directly and compare behavior.
+
+Prompt model:
+
+- `qim-data` should avoid replacing native transfer prompts where possible.
+- Let `croc` handle receive code prompts and acceptance prompts by default.

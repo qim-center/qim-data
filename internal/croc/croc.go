@@ -1,10 +1,8 @@
 package croc
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -85,9 +83,11 @@ func CheckRelayDial(relay string, timeout time.Duration) error {
 }
 
 // Run executes croc with inherited stdio.
-func Run(path string, args []string, extraEnv map[string]string, redactions []string) error {
+func Run(path string, args []string, extraEnv map[string]string) error {
 	cmd := exec.Command(path, args...)
 	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	env := os.Environ()
 	for k, v := range extraEnv {
@@ -95,68 +95,5 @@ func Run(path string, args []string, extraEnv map[string]string, redactions []st
 	}
 	cmd.Env = env
 
-	if len(redactions) == 0 {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		return cmd.Run()
-	}
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	done := make(chan error, 2)
-	go func() { done <- copyWithRedaction(os.Stdout, stdoutPipe, redactions) }()
-	go func() { done <- copyWithRedaction(os.Stderr, stderrPipe, redactions) }()
-
-	var copyErr error
-	for i := 0; i < 2; i++ {
-		if err := <-done; err != nil && copyErr == nil {
-			copyErr = err
-		}
-	}
-
-	waitErr := cmd.Wait()
-	if copyErr != nil {
-		return copyErr
-	}
-	return waitErr
-}
-
-func copyWithRedaction(dst io.Writer, src io.Reader, redactions []string) error {
-	replacerArgs := []string{}
-	for _, value := range redactions {
-		v := strings.TrimSpace(value)
-		if v == "" {
-			continue
-		}
-		replacerArgs = append(replacerArgs, v, "[REDACTED]")
-	}
-	replacer := strings.NewReplacer(replacerArgs...)
-
-	r := bufio.NewReader(src)
-	for {
-		chunk, err := r.ReadString('\n')
-		if chunk != "" {
-			chunk = replacer.Replace(chunk)
-			if _, wErr := io.WriteString(dst, chunk); wErr != nil {
-				return wErr
-			}
-		}
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-	}
+	return cmd.Run()
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -15,8 +16,10 @@ const (
 
 // Config stores local qim-data settings.
 type Config struct {
-	Relay     string `json:"relay"`
-	RelayPass string `json:"relay_pass"`
+	Relay        string `json:"relay"`
+	RelayPassFile string `json:"relay_pass_file,omitempty"`
+	// RelayPass is kept for backward compatibility with early local config drafts.
+	RelayPass string `json:"relay_pass,omitempty"`
 	CrocPath  string `json:"croc_path,omitempty"`
 	UpdatedAt string `json:"updated_at,omitempty"`
 }
@@ -35,6 +38,15 @@ func Path() (string, error) {
 		return "", fmt.Errorf("resolve user config directory: %w", err)
 	}
 	return filepath.Join(dir, "qim-data", "config.json"), nil
+}
+
+// SecretPath returns the relay secret file path.
+func SecretPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user config directory: %w", err)
+	}
+	return filepath.Join(dir, "qim-data", "relay.pass"), nil
 }
 
 // Load reads config from disk.
@@ -93,3 +105,23 @@ func Save(cfg Config) error {
 	return nil
 }
 
+// WriteSecret stores the relay secret using restrictive permissions and
+// returns the saved secret file path.
+func WriteSecret(secret string) (string, error) {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return "", fmt.Errorf("secret cannot be empty")
+	}
+	path, err := SecretPath()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create config directory %s: %w", dir, err)
+	}
+	if err := os.WriteFile(path, []byte(secret+"\n"), 0o600); err != nil {
+		return "", fmt.Errorf("write secret file %s: %w", path, err)
+	}
+	return path, nil
+}

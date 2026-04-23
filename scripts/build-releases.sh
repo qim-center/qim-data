@@ -45,6 +45,7 @@ for target in "${TARGETS[@]}"; do
     -ldflags="${LDFLAGS}" \
     -o "${output}" \
     ./cmd/qim-data
+  chmod +x "${output}"
 done
 
 # Generate checksums

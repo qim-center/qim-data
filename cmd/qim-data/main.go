@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"qim-data/internal/config"
 	"qim-data/internal/croc"
 	"qim-data/internal/installer"
+	"qim-data/internal/tunnel"
 )
 
 func main() {
@@ -183,8 +185,39 @@ func runSend(args []string) error {
 		return err
 	}
 
+	relayHost, _, err := net.SplitHostPort(relay)
+	if err != nil {
+		relayHost = relay
+	}
+
+	tunnelMode := false
+	tunnelCancel := func() {}
+	dialTimeout := 3 * time.Second
+
+	if r, err := croc.CheckRelayReachability(relay, dialTimeout); err == nil && !r.TCPDial && r.WSProxy {
+		ctx, cancel := context.WithCancel(context.Background())
+		t, err := tunnel.Start(ctx, relayHost)
+		if err != nil {
+			cancel()
+			fmt.Fprintf(os.Stderr, "[qim-data] tunnel unavailable: %v (falling back to direct relay)\n", err)
+		} else {
+			tunnelMode = true
+			tunnelCancel = func() {
+				cancel()
+				t.Close()
+			}
+		}
+	}
+
+	defer tunnelCancel()
+
+	crocRelay := relay
+	if tunnelMode {
+		crocRelay = "127.0.0.1:9009"
+	}
+
 	crocArgs := []string{
-		"--relay", relay,
+		"--relay", crocRelay,
 		"send",
 	}
 	if trimmed := strings.TrimSpace(*code); trimmed != "" {
@@ -230,8 +263,39 @@ func runReceive(args []string) error {
 		return err
 	}
 
+	relayHost, _, err := net.SplitHostPort(relay)
+	if err != nil {
+		relayHost = relay
+	}
+
+	tunnelMode := false
+	tunnelCancel := func() {}
+	dialTimeout := 3 * time.Second
+
+	if r, err := croc.CheckRelayReachability(relay, dialTimeout); err == nil && !r.TCPDial && r.WSProxy {
+		ctx, cancel := context.WithCancel(context.Background())
+		t, err := tunnel.Start(ctx, relayHost)
+		if err != nil {
+			cancel()
+			fmt.Fprintf(os.Stderr, "[qim-data] tunnel unavailable: %v (falling back to direct relay)\n", err)
+		} else {
+			tunnelMode = true
+			tunnelCancel = func() {
+				cancel()
+				t.Close()
+			}
+		}
+	}
+
+	defer tunnelCancel()
+
+	crocRelay := relay
+	if tunnelMode {
+		crocRelay = "127.0.0.1:9009"
+	}
+
 	crocArgs := []string{
-		"--relay", relay,
+		"--relay", crocRelay,
 	}
 	if out := strings.TrimSpace(*outDir); out != "" {
 		crocArgs = append(crocArgs, "--out", out)
@@ -243,7 +307,6 @@ func runReceive(args []string) error {
 		return err
 	}
 	if code != "" {
-		// Using CROC_SECRET avoids classic-mode issues on Linux/macOS.
 		extraEnv["CROC_SECRET"] = code
 	}
 
@@ -325,10 +388,22 @@ func runCheck(args []string) error {
 	}
 
 	if err := croc.CheckRelayDial(relay, *timeout); err != nil {
-		printCheck(false, "relay reachability", err.Error())
+		printCheck(false, "relay TCP :9009", "blocked")
 		failed = true
 	} else {
-		printCheck(true, "relay reachability", "tcp dial ok")
+		printCheck(true, "relay TCP :9009", "reachable (direct mode)")
+	}
+
+	if r, err := croc.CheckRelayReachability(relay, *timeout); err == nil {
+		if r.WSProxy {
+			printCheck(true, "relay WS :443", "tunnel available")
+		} else {
+			printCheck(false, "relay WS :443", "not available")
+			failed = true
+		}
+	} else {
+		printCheck(false, "relay WS :443", "check failed: "+err.Error())
+		failed = true
 	}
 
 	if failed {

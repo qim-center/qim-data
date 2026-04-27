@@ -1,6 +1,7 @@
 package croc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"qim-data/internal/config"
+	"qim-data/internal/tunnel"
 )
 
 var versionRegex = regexp.MustCompile(`v(\d+)`)
@@ -80,6 +82,48 @@ func CheckRelayDial(relay string, timeout time.Duration) error {
 	}
 	_ = conn.Close()
 	return nil
+}
+
+// CheckWSRelayDial checks whether the WebSocket tunnel endpoint is reachable.
+// host should be the relay hostname without port (e.g. "data-relay.qim.dk").
+func CheckWSRelayDial(host string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return tunnel.CheckWSRelay(ctx, host, timeout)
+}
+
+// RelayReachability describes which relay paths are available.
+type RelayReachability struct {
+	TCPDial bool
+	WSProxy bool
+}
+
+// CheckRelayReachability probes both direct TCP and WebSocket tunnel paths.
+// relay should include port (e.g. "data-relay.qim.dk:9009").
+func CheckRelayReachability(relay string, timeout time.Duration) (RelayReachability, error) {
+	var r RelayReachability
+
+	if err := CheckRelayDial(relay, timeout); err == nil {
+		r.TCPDial = true
+	} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		r.TCPDial = false
+	} else {
+		r.TCPDial = false
+	}
+
+	host, _, err := net.SplitHostPort(relay)
+	if err != nil {
+		host = relay
+	}
+	if err := CheckWSRelayDial(host, timeout); err == nil {
+		r.WSProxy = true
+	} else if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		r.WSProxy = false
+	} else {
+		r.WSProxy = false
+	}
+
+	return r, nil
 }
 
 // Run executes croc with inherited stdio.

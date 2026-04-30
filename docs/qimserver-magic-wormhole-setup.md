@@ -1,28 +1,54 @@
 # qimserver Magic Wormhole Implementation Notes
 
-Date: 2026-04-29
-Host: `qimserver.compute.dtu.dk`
+Date: 2026-04-30
+Primary host: `qimserver.compute.dtu.dk`
 
-This document records the exact implementation and validation steps completed for self-hosted Magic Wormhole relay/transit on `qimserver`.
+This document records the implemented and validated split deployment.
+
+# Magic-Wormhole Deployment Strategy
+
+## Current State (Implemented)
+
+Production is now split across two hosts:
+
+| Component | Hostname | FQDN | Public IP | Endpoint |
+|---|---|---|---|---|
+| Mailbox relay | `qimserver` | `qimserver.compute.dtu.dk` | `130.225.68.197` | `wss://wormhole-mailbox.qim.dk/v1` |
+| Transit relay | `comp-vmfima` | `comp-vmfima.compute.dtu.dk` | `130.225.69.184` | `tcp:wormhole-transit.qim.dk:443` |
+
+Reason for split:
+
+- HPC reachability to transit on `:4001` was not reliable.
+- `qimserver` has shared nginx on `:443`, so raw transit could not be colocated there.
+- Dedicated VM now serves transit on `:443`, and this path is validated.
+
+Validated behavior:
+
+- Same-network peers use direct P2P (transit bypassed).
+- HPC -> external hotspot uses private transit: `relay:tcp:wormhole-transit.qim.dk:443`.
+
+# Set-up
 
 ## Goal
 
 Deploy private Wormhole infrastructure so transfers can use:
 
 - Mailbox relay (WebSocket handshake): `wss://wormhole-mailbox.qim.dk/v1`
-- Transit helper (TCP fallback/data relay): `tcp:wormhole-transit.qim.dk:4001`
+- Transit helper (TCP fallback/data relay): `tcp:wormhole-transit.qim.dk:443`
+
+## Final Deployed Topology
+
+- Mailbox host: `qimserver.compute.dtu.dk` (`130.225.68.197`)
+- Transit host: `comp-vmfima.compute.dtu.dk` (`130.225.69.184`)
+- Transit VM hostname: `comp-vmfima`
+- Transit VM FQDN: `comp-vmfima.compute.dtu.dk`
 
 ## DNS Final State
 
 Verified A records:
 
 - `wormhole-mailbox.qim.dk` -> `130.225.68.197`
-- `wormhole-transit.qim.dk` -> `130.225.68.197`
-
-Notes:
-
-- A wrong `transit` DNS record and IPv6 answer were encountered initially and corrected.
-- Final `getent hosts` checks returned the expected IPv4 for both names.
+- `wormhole-transit.qim.dk` -> `130.225.69.184`
 
 ## System User and Data Directory
 
@@ -61,52 +87,72 @@ SELinux context restore on venv:
 sudo restorecon -Rv /opt/wormhole-venv
 ```
 
-## systemd Services
+## qimserver Services
 
-Installed two units:
+Installed and used on `qimserver`:
 
 - `/etc/systemd/system/wormhole-mailbox.service`
-- `/etc/systemd/system/wormhole-transit.service`
 
 Service behavior:
 
 - Mailbox binds loopback only: `127.0.0.1:4000`
-- Transit binds externally: `0.0.0.0:4001`
 
 Enabled and started:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now wormhole-mailbox.service wormhole-transit.service
+sudo systemctl enable --now wormhole-mailbox.service
 ```
 
-Both services reached `active (running)`.
+Mailbox service reached `active (running)`.
+
+## Transit Service on Dedicated VM
+
+Transit runs on a dedicated VM to provide a reachable `:443` endpoint for HPC networks.
+
+- Hostname: `comp-vmfima`
+- FQDN: `comp-vmfima.compute.dtu.dk`
+- Public IP: `130.225.69.184`
+- Service: `/etc/systemd/system/wormhole-transit.service`
+- Bind port: `443`
+
+Key service details on VM:
+
+- `ExecStart=... transitrelay --port=tcp:443 ...`
+- `AmbientCapabilities=CAP_NET_BIND_SERVICE`
+- `CapabilityBoundingSet=CAP_NET_BIND_SERVICE`
 
 ## SELinux and Firewall
 
-Applied SELinux settings:
+Applied SELinux settings on `qimserver`:
 
 ```bash
 sudo semanage port -a -t http_port_t -p tcp 4000
-sudo semanage port -a -t unreserved_port_t -p tcp 4001
 sudo setsebool -P httpd_can_network_connect 1
+sudo semanage fcontext -a -t var_t "/var/lib/wormhole(/.*)?"
+sudo restorecon -Rv /var/lib/wormhole
+```
+
+Applied on transit VM (`comp-vmfima`) for port `443`:
+
+```bash
+sudo restorecon -Rv /opt/wormhole-venv
 sudo semanage fcontext -a -t var_t "/var/lib/wormhole(/.*)?"
 sudo restorecon -Rv /var/lib/wormhole
 ```
 
 Notes:
 
-- `4001/tcp` already appeared under existing labels on this shared server; wormhole still started and bound successfully.
-- No AVC denials were observed during startup/tests (`ausearch -m avc -ts recent | grep -E 'wormhole|twist'` returned none).
+- No AVC denials were observed during startup/tests on final topology.
 
 Firewall:
 
 ```bash
-sudo firewall-cmd --permanent --add-port=4001/tcp
+sudo firewall-cmd --permanent --add-service=https
 sudo firewall-cmd --reload
 ```
 
-Port `4001/tcp` is open.
+Transit VM serves on `443/tcp`.
 
 ## nginx + TLS for Mailbox
 
@@ -126,19 +172,18 @@ Final behavior:
 
 ## End-to-End Validation (Successful)
 
-### Sender (local workstation)
+### Sender (HPC)
 
 ```bash
-wormhole --relay-url=wss://wormhole-mailbox.qim.dk/v1 --transit-helper=tcp:wormhole-transit.qim.dk:4001 send mussel.tif
+wormhole --relay-url=wss://wormhole-mailbox.qim.dk/v1 --transit-helper=tcp:wormhole-transit.qim.dk:443 send shell_225x128x128.tif
 ```
 
 Observed:
 
-- 2.40 GB file transfer completed successfully
-- Throughput around `116 MB/s`
-- Confirmation received
+- Transfer completed successfully.
+- In constrained-network test, transfer explicitly used `relay:tcp:wormhole-transit.qim.dk:443`.
 
-### Receiver (HPC)
+### Receiver (mobile hotspot)
 
 ```bash
 wormhole --relay-url=wss://wormhole-mailbox.qim.dk/v1 receive
@@ -146,19 +191,19 @@ wormhole --relay-url=wss://wormhole-mailbox.qim.dk/v1 receive
 
 Observed:
 
-- Received file `mussel.tif` successfully
-- Transfer completed at matching speed
+- Received file successfully.
+- Output confirmed use of `relay:tcp:wormhole-transit.qim.dk:443`.
 
 ### Path confirmation from transfer output
 
-- Sender showed direct peer path: `Sending (<-192.38.95.134:50168)..`
-- Receiver showed direct peer path: `Receiving (->tcp:10.52.16.250:41851)..`
+- Same-network test showed direct peer path (expected).
+- HPC -> mobile hotspot test showed transit relay path on both ends: `relay:tcp:wormhole-transit.qim.dk:443`.
 
 Interpretation:
 
 - Mailbox relay (`wss://wormhole-mailbox.qim.dk/v1`) handled code exchange/coordination.
-- Data path for this specific transfer was direct P2P between endpoints (fast path), which is expected when routable.
-- Transit relay remains available for NAT/firewall fallback via `wormhole-transit.qim.dk:4001`.
+- Direct P2P is used when routable.
+- Fallback transit relay is now served privately via `wormhole-transit.qim.dk:443` on `comp-vmfima.compute.dtu.dk`.
 
 ## Useful Operational Commands
 
@@ -178,7 +223,7 @@ sudo journalctl -u wormhole-mailbox -u wormhole-transit -f
 Listening sockets:
 
 ```bash
-sudo ss -tlnp | grep -E '4000|4001'
+sudo ss -tlnp | grep -E '4000|443'
 ```
 
 nginx check/reload:
@@ -187,14 +232,3 @@ nginx check/reload:
 sudo nginx -t
 sudo systemctl reload nginx
 ```
-
-## Recommended Client Configuration
-
-For any sender/receiver that must use this infrastructure, set:
-
-```bash
-export WORMHOLE_RELAY_URL=wss://wormhole-mailbox.qim.dk/v1
-export WORMHOLE_TRANSIT_HELPER=tcp:wormhole-transit.qim.dk:4001
-```
-
-Note: some `wormhole` versions accept `--transit-helper` only as a global option (before subcommands).

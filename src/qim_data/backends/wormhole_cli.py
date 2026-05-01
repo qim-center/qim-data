@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
-import pty
 import subprocess
 import sys
 from pathlib import Path
+
+try:
+    import pty
+except ImportError:  # Windows
+    pty = None
 
 from ..config import QimDataConfig
 from .base import ReceiveRequest, SendRequest
@@ -40,6 +44,9 @@ class WormholeCliBackend:
         ]
 
     def _run_send_with_filtered_output(self, cmd: list[str]) -> int:
+        if pty is None:
+            return self._run_send_with_pipe_filtered_output(cmd)
+
         master_fd, slave_fd = pty.openpty()
         process = subprocess.Popen(
             cmd,
@@ -114,5 +121,42 @@ class WormholeCliBackend:
                     sys.stdout.flush()
         finally:
             os.close(master_fd)
+
+        return process.wait()
+
+    def _run_send_with_pipe_filtered_output(self, cmd: list[str]) -> int:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        suppress_next_blank = False
+        suppress_next_receive = False
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            stripped = line.strip()
+
+            if stripped == "On the other computer, please run:":
+                suppress_next_blank = True
+                suppress_next_receive = True
+                continue
+
+            if suppress_next_blank and stripped == "":
+                suppress_next_blank = False
+                continue
+
+            if suppress_next_receive and stripped.startswith("wormhole receive "):
+                suppress_next_receive = False
+                continue
+
+            if stripped.startswith("Wormhole code is:"):
+                line = line.replace("Wormhole code is:", "Transfer code is:", 1)
+
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
         return process.wait()

@@ -57,9 +57,6 @@ class WormholeCliBackend:
         def handle_token(token: str) -> tuple[bool, str]:
             nonlocal suppress_next_blank, suppress_next_receive
 
-            if token.endswith("\r"):
-                return False, token
-
             stripped = token.strip()
 
             if stripped == "On the other computer, please run:":

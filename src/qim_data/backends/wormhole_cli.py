@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import pty
 import subprocess
 import sys
 from pathlib import Path
@@ -38,38 +40,82 @@ class WormholeCliBackend:
         ]
 
     def _run_send_with_filtered_output(self, cmd: list[str]) -> int:
+        master_fd, slave_fd = pty.openpty()
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+            stdin=None,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
         )
+        os.close(slave_fd)
 
         suppress_next_blank = False
         suppress_next_receive = False
+        pending = ""
 
-        assert process.stdout is not None
-        for line in process.stdout:
-            stripped = line.strip()
+        def handle_token(token: str) -> tuple[bool, str]:
+            nonlocal suppress_next_blank, suppress_next_receive
+
+            if token.endswith("\r"):
+                return False, token
+
+            stripped = token.strip()
 
             if stripped == "On the other computer, please run:":
                 suppress_next_blank = True
                 suppress_next_receive = True
-                continue
+                return True, ""
 
             if suppress_next_blank and stripped == "":
                 suppress_next_blank = False
-                continue
+                return True, ""
 
             if suppress_next_receive and stripped.startswith("wormhole receive "):
                 suppress_next_receive = False
-                continue
+                return True, ""
 
             if stripped.startswith("Wormhole code is:"):
-                line = line.replace("Wormhole code is:", "Transfer code is:", 1)
+                token = token.replace("Wormhole code is:", "Transfer code is:", 1)
 
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            return False, token
+
+        try:
+            while True:
+                try:
+                    data = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+
+                pending += data.decode("utf-8", errors="replace")
+
+                while True:
+                    split_idx = -1
+                    sep = ""
+                    for candidate in ("\n", "\r"):
+                        idx = pending.find(candidate)
+                        if idx != -1 and (split_idx == -1 or idx < split_idx):
+                            split_idx = idx
+                            sep = candidate
+
+                    if split_idx == -1:
+                        break
+
+                    token = pending[: split_idx + 1]
+                    pending = pending[split_idx + 1 :]
+                    suppress, rewritten = handle_token(token)
+                    if not suppress:
+                        sys.stdout.write(rewritten)
+                        sys.stdout.flush()
+
+            if pending:
+                _, rewritten = handle_token(pending)
+                if rewritten:
+                    sys.stdout.write(rewritten)
+                    sys.stdout.flush()
+        finally:
+            os.close(master_fd)
 
         return process.wait()

@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
-  { name = "QIM Center" }
+  { name = "Felipe Delestro" }
 ]
 keywords = ["wormhole", "cli", "file-transfer", "qim"]
 classifiers = [
@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/qimcenter/qim-data"
+Homepage = "https://github.com/qim-center/qim-data"
 
 [project.scripts]
 qim-data = "qim_data.cli:main"

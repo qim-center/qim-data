@@ -2,6 +2,19 @@
 
 QIM Center wrapper around `magic-wormhole`.
 
+## Install
+
+```bash
+pip install qim-data
+```
+
+## Quick usage
+
+```bash
+qim-data send /path/to/file
+qim-data receive
+```
+
 ## Current status
 
 Initial Python package structure is in place with a CLI-first backend:

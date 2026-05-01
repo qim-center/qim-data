@@ -22,9 +22,12 @@ class WormholeCliBackend:
 
     def receive(self, request: ReceiveRequest) -> int:
         cmd = self._base_cmd() + ["receive"]
-        if request.code:
-            cmd.append(request.code)
-        return self._run_receive_with_filtered_output(cmd)
+        code = request.code
+        if not code:
+            code = input("Enter transfer code: ").strip()
+        if code:
+            cmd.append(code)
+        return subprocess.run(cmd, check=False).returncode
 
     def _base_cmd(self) -> list[str]:
         return [
@@ -66,23 +69,6 @@ class WormholeCliBackend:
             if stripped.startswith("Wormhole code is:"):
                 line = line.replace("Wormhole code is:", "Transfer code is:", 1)
 
-            sys.stdout.write(line)
-            sys.stdout.flush()
-
-        return process.wait()
-
-    def _run_receive_with_filtered_output(self, cmd: list[str]) -> int:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-
-        assert process.stdout is not None
-        for line in process.stdout:
-            line = line.replace("Enter receive wormhole code:", "Enter transfer code:")
             sys.stdout.write(line)
             sys.stdout.flush()
 

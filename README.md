@@ -2,6 +2,8 @@
 
 QIM Center wrapper around `magic-wormhole`.
 
+Architecture and contributor notes: `docs/CLI-wrapper.md`
+
 ## Install
 
 ```bash
